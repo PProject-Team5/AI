@@ -1,0 +1,33 @@
+pipeline:
+  block_threshold_nsfw: 0.7
+  block_threshold_malware: 0.8
+  stage2_enabled: true
+
+stage1:
+  nsfw:
+    clip_model: "ViT-B/32"
+    slim: false
+    suspicious_range: [0.3, 0.7]
+  malware:
+    suspicious_range: [0.2, 0.8]
+
+stage2:
+  nsfw:
+    confidence_threshold: 0.3
+  malware:
+    feature_version: 2
+
+distillation:
+  nsfw:
+    temperature: 3.0
+    alpha: 0.5
+    learning_rate: 0.0001
+    epochs: 50
+    batch_size: 64
+  malware:
+    pseudo_label_weight: 0.3
+    min_samples: 100
+
+server:
+  host: "0.0.0.0"
+  port: 8099
