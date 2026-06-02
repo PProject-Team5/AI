@@ -26,7 +26,7 @@ train-stage1:
 
 train-stage2:
 	@echo "Training Stage 2 Malware model (EMBER LightGBM)..."
-	$(PYTHON) -c "import pandas as pd; import lightgbm as lgb; import numpy as np; df = pd.read_csv('data/MalwareData.csv', sep='|'); y = (1 - df['legitimate'].values).astype(np.float32); X = df.drop(columns=['Name', 'md5', 'legitimate']).values.astype(np.float32); dtrain = lgb.Dataset(X, label=y); model = lgb.train({'objective': 'binary', 'metric': 'auc', 'num_leaves': 31, 'learning_rate': 0.05, 'verbose': -1}, dtrain, num_boost_round=100); os.makedirs('models', exist_ok=True); model.save_model('models/ember_lgbm.txt')"
+	$(PYTHON) -c "import os; import pandas as pd; import lightgbm as lgb; import numpy as np; df = pd.read_csv('data/MalwareData.csv', sep='|'); y = (1 - df['legitimate'].values).astype(np.float32); X = df.drop(columns=['Name', 'md5', 'legitimate']).values.astype(np.float32); dtrain = lgb.Dataset(X, label=y); model = lgb.train({'objective': 'binary', 'metric': 'auc', 'num_leaves': 31, 'learning_rate': 0.05, 'verbose': -1}, dtrain, num_boost_round=100); os.makedirs('models', exist_ok=True); model.save_model('models/ember_lgbm.txt')"
 
 init: setup train-stage1 train-stage2
 	@echo "Initialization completed. Ready to serve!"
