@@ -62,6 +62,7 @@ class CascadePipeline:
         config = config or {}
         self._nsfw_detector = None
         self._pe_detector = None
+        self._doc_scanner = None
         self._nudenet_detector = None
         self._ember_detector = None
         self._nsfw_distiller = None
@@ -88,6 +89,15 @@ class CascadePipeline:
                 model_path=model_path if os.path.exists(model_path) else None,
             )
         return self._pe_detector
+
+    def _get_doc_scanner(self):
+        if self._doc_scanner is None:
+            from src.stage1.doc_scanner import DocScanner
+            model_path = os.path.join(os.path.dirname(__file__), "models/doc_xgb.json")
+            self._doc_scanner = DocScanner(
+                model_path=model_path if os.path.exists(model_path) else None,
+            )
+        return self._doc_scanner
 
     def _get_nudenet(self):
         if self._nudenet_detector is None:
@@ -120,12 +130,24 @@ class CascadePipeline:
 
     @staticmethod
     def detect_file_type(file_path: str, file_bytes: bytes = None) -> str:
+        from src.stage1.doc_scanner import CODE_EXTENSIONS
         if file_bytes is None:
             with open(file_path, 'rb') as f:
                 file_bytes = f.read(4096)
 
         if file_bytes[:2] == b'MZ':
             return "pe"
+
+        if file_bytes[:4] == b'%PDF':
+            return "pdf"
+
+        # OLE2 (PPT, DOC, XLS)
+        if file_bytes[:8] == b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1':
+            return "ole"
+
+        # OOXML / ZIP (PPTX, DOCX, XLSX)
+        if file_bytes[:4] == b'PK\x03\x04':
+            return "office"
 
         image_signatures = [
             b'\xff\xd8\xff',
@@ -138,6 +160,10 @@ class CascadePipeline:
         for sig in image_signatures:
             if file_bytes[:len(sig)] == sig:
                 return "image"
+
+        ext = os.path.splitext(file_path)[1].lower()
+        if ext in CODE_EXTENSIONS:
+            return "code"
 
         return "unknown"
 
@@ -235,6 +261,47 @@ class CascadePipeline:
                             result.blocked = False
                     except Exception as e:
                         logger.warning(f"Stage 2 Malware failed: {e}")
+                        result.blocked = False
+                else:
+                    result.blocked = False
+
+        elif file_type in ("pdf", "office", "ole", "code"):
+            doc = self._get_doc_scanner()
+            stage1_result = doc.predict(file_path=file_path, file_bytes=file_bytes, file_type=file_type)
+            result.malware_prob = stage1_result["malware_prob"]
+            result.malware_label = stage1_result["label"]
+
+            if stage1_result["label"] == "safe":
+                result.blocked = False
+                result.stage_used = 1
+            elif stage1_result["label"] == "malware":
+                result.blocked = True
+                result.stage_used = 1
+            else:
+                result.stage_used = 1
+                if self.stage2_enabled:
+                    try:
+                        ember = self._get_ember()
+                        stage2_result = ember.predict(file_path=file_path, file_bytes=file_bytes)
+                        result.malware_stage2_checked = True
+                        result.stage_used = 2
+
+                        self._get_malware_distiller().collect_sample(
+                            pe_features=stage1_result["features"],
+                            stage1_prob=stage1_result["malware_prob"],
+                            stage2_result=stage2_result,
+                            file_hash=file_hash,
+                        )
+
+                        if stage2_result["is_malware"]:
+                            result.malware_prob = max(result.malware_prob, stage2_result["malware_prob"])
+                            result.malware_label = "malware"
+                            result.blocked = True
+                        else:
+                            result.malware_label = "safe"
+                            result.blocked = False
+                    except Exception as e:
+                        logger.warning(f"Stage 2 Doc failed: {e}")
                         result.blocked = False
                 else:
                     result.blocked = False

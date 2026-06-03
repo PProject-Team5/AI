@@ -14,7 +14,16 @@ Two-stage cascade content moderation with knowledge distillation for the Minit f
 
 ## Overview
 
-Minit-ML scans uploaded files for **NSFW images** and **PE malware** using a two-stage approach:
+Minit-ML scans uploaded files for **NSFW images** and **malware** using a two-stage approach.
+
+**지원 파일 형식**
+
+| 카테고리 | 형식 |
+|----------|------|
+| 이미지 | `.jpg` `.png` `.gif` `.bmp` `.webp` |
+| 실행 파일 | `.exe` `.dll` `.sys` (PE) |
+| 문서 | `.pdf` `.pptx` `.docx` `.xlsx` `.ppt` `.doc` `.xls` |
+| 코드 | `.py` `.js` `.ts` `.sh` `.ps1` `.rb` `.php` `.java` `.c` `.cpp` `.go` `.rs` `.lua` `.vbs` `.bat` 외 |
 
 1. **Stage 1 (Lightweight)**: Fast models (~50ms) filter the majority of files on the synchronous upload path
 2. **Stage 2 (Heavy)**: Suspicious files are verified asynchronously by more accurate models
@@ -27,6 +36,7 @@ flowchart TD
     Upload[File Upload] --> Detect{File Type?}
     Detect -->|Image| S1_NSFW["Stage 1: CLIP + MLP Head\n~41ms"]
     Detect -->|PE/EXE| S1_MAL["Stage 1: PE Imports + XGBoost\n~58ms"]
+    Detect -->|PDF/Office/Code| S1_DOC["Stage 1: DocScanner + XGBoost"]
     Detect -->|Other| Pass[Pass]
 
     S1_NSFW --> V1{Verdict?}
@@ -39,6 +49,11 @@ flowchart TD
     V2 -->|safe| OK2[Allow]
     V2 -->|malware| Block2[Block]
     V2 -->|suspicious| S2_MAL["Stage 2: EMBER + LightGBM\n~100ms"]
+
+    S1_DOC --> V3{Verdict?}
+    V3 -->|safe| OK3[Allow]
+    V3 -->|malware| Block3[Block]
+    V3 -->|suspicious| S2_MAL
 
     S2_NSFW --> Final1[Final Verdict]
     S2_MAL --> Final2[Final Verdict]
@@ -54,7 +69,8 @@ flowchart TD
 - **Language**: Python 3.10+
 - **Framework**: FastAPI + Uvicorn
 - **Stage 1 NSFW**: OpenAI CLIP (ViT-B/32) + PyTorch MLP head
-- **Stage 1 Malware**: pefile feature extraction + XGBoost
+- **Stage 1 Malware (PE)**: pefile import feature extraction + XGBoost
+- **Stage 1 Malware (Doc/Code)**: PDF/Office/OLE/Code structural features + XGBoost
 - **Stage 2 NSFW**: NudeNet (YOLOv8-nano ONNX, 18 body-part classes)
 - **Stage 2 Malware**: EMBER PE features + LightGBM
 - **Distillation**: Soft-label BCE (NSFW) / Pseudo-label XGBoost retrain (Malware)
@@ -104,7 +120,8 @@ make clean           # Remove caches and temp files
 ├── src/
 │   ├── stage1/
 │   │   ├── clip_nsfw.py     # CLIP + MLP head NSFW detector
-│   │   └── pe_lite.py       # PE import features + XGBoost detector
+│   │   ├── pe_lite.py       # PE import features + XGBoost detector
+│   │   └── doc_scanner.py   # PDF/Office/OLE/Code features + XGBoost detector
 │   ├── stage2/
 │   │   ├── nudenet_nsfw.py  # NudeNet YOLOv8 ONNX detector
 │   │   └── ember_malware.py # EMBER PE features + LightGBM detector

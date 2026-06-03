@@ -92,9 +92,11 @@ class PELiteDetector:
         self,
         model_path: Optional[str] = None,
         suspicious_range: Tuple[float, float] = (0.2, 0.8),
+        calibrator_path: Optional[str] = None,
     ):
         self.suspicious_range = suspicious_range
         self.model = None
+        self._calibrator = None  # Platt Scaling (LogisticRegression on raw prob)
 
         if model_path and os.path.exists(model_path):
             self.model = xgb.Booster()
@@ -102,6 +104,43 @@ class PELiteDetector:
             print(f"[Stage1-Malware] Loaded XGBoost from {model_path}")
         else:
             print("[Stage1-Malware] No pre-trained model")
+
+        # Load calibrator if available (fitted by fit_calibrator())
+        cal_path = calibrator_path or (model_path.replace(".json", "_calibrator.pkl") if model_path else None)
+        if cal_path and os.path.exists(cal_path):
+            import pickle
+            with open(cal_path, "rb") as f:
+                self._calibrator = pickle.load(f)
+            print(f"[Stage1-Malware] Loaded Platt calibrator from {cal_path}")
+
+    def _calibrate(self, raw_prob: float) -> float:
+        """Apply Platt Scaling if calibrator is loaded, else return raw prob."""
+        if self._calibrator is None:
+            return raw_prob
+        import numpy as np
+        p = self._calibrator.predict_proba(np.array([[raw_prob]]))[0, 1]
+        return float(p)
+
+    def fit_calibrator(self, y_true: np.ndarray, X_val: np.ndarray, save_path: Optional[str] = None):
+        """
+        Fit Platt Scaling on a held-out validation set.
+        Reduces ECE from ~0.135 to ~0.009 (see experiments/revised_experiments.py Exp B).
+        Call once after training, before deploying.
+        """
+        from sklearn.linear_model import LogisticRegression
+        import pickle
+
+        dmat = xgb.DMatrix(X_val)
+        raw_probs = self.model.predict(dmat).reshape(-1, 1)
+        cal = LogisticRegression(solver="lbfgs")
+        cal.fit(raw_probs, y_true)
+        self._calibrator = cal
+
+        if save_path:
+            os.makedirs(os.path.dirname(save_path), exist_ok=True)
+            with open(save_path, "wb") as f:
+                pickle.dump(cal, f)
+            print(f"[Stage1-Malware] Platt calibrator saved to {save_path}")
 
     def predict(self, file_path: str = None, file_bytes: bytes = None) -> dict:
         features = extract_pe_imports(file_path, file_bytes)
@@ -121,7 +160,8 @@ class PELiteDetector:
             }
 
         dmat = xgb.DMatrix(features.reshape(1, -1))
-        prob = float(self.model.predict(dmat)[0])
+        raw_prob = float(self.model.predict(dmat)[0])
+        prob = self._calibrate(raw_prob)  # Platt-scaled if calibrator loaded
 
         lo, hi = self.suspicious_range
         if prob < lo:
@@ -133,6 +173,7 @@ class PELiteDetector:
 
         return {
             "malware_prob": prob,
+            "raw_malware_prob": raw_prob,
             "label": label,
             "needs_stage2": label == "suspicious",
             "features": features,
