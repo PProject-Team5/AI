@@ -16,14 +16,12 @@ Two-stage cascade content moderation with knowledge distillation for the Minit f
 
 Minit-ML scans uploaded files for **NSFW images** and **malware** using a two-stage approach.
 
-**지원 파일 형식**
-
-| 카테고리 | 형식 |
-|----------|------|
-| 이미지 | `.jpg` `.png` `.gif` `.bmp` `.webp` |
-| 실행 파일 | `.exe` `.dll` `.sys` (PE) |
-| 문서 | `.pdf` `.pptx` `.docx` `.xlsx` `.ppt` `.doc` `.xls` |
-| 코드 | `.py` `.js` `.ts` `.sh` `.ps1` `.rb` `.php` `.java` `.c` `.cpp` `.go` `.rs` `.lua` `.vbs` `.bat` 외 |
+| Category | Formats |
+|----------|---------|
+| Images | `.jpg` `.png` `.gif` `.bmp` `.webp` |
+| Executables | `.exe` `.dll` `.sys` (PE) |
+| Documents | `.pdf` `.pptx` `.docx` `.xlsx` `.ppt` `.doc` `.xls` |
+| Code | `.py` `.js` `.ts` `.sh` `.ps1` `.rb` `.php` `.java` `.c` `.cpp` `.go` `.rs` `.lua` `.vbs` `.bat` and others |
 
 1. **Stage 1 (Lightweight)**: Fast models (~50ms) filter the majority of files on the synchronous upload path
 2. **Stage 2 (Heavy)**: Suspicious files are verified asynchronously by more accurate models
