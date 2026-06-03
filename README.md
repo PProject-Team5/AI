@@ -1,6 +1,13 @@
 # Minit-ML
 
-<img width="432" height="150" alt="image" src="https://github.com/user-attachments/assets/a9c8f0bc-1ee7-4676-bd26-5b4c4e4274a2" />
+<p align="center">
+  <img
+    width="432"
+    height="150"
+    alt="image"
+    src="https://github.com/user-attachments/assets/a9c8f0bc-1ee7-4676-bd26-5b4c4e4274a2"
+  />
+</p>
 
 
 Two-stage cascade content moderation with knowledge distillation for the Minit file sharing service.
