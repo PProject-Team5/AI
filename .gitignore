@@ -20,6 +20,7 @@ venv/
 .venv/
 .DS_Store
 *.png
+!docs/benchmarks/*.png
 references/
 PIPELINE.md
 ARCHITECTURE.md

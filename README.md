@@ -116,9 +116,19 @@ make clean           # Remove caches and temp files
 └── references/              # Upstream repos (NudeNet, EMBER, etc.)
 ```
 
-## Related Docs
+## Benchmarks
 
-- [PIPELINE.md](./PIPELINE.md) — Detailed pipeline & distillation internals
-- [ARCHITECTURE.md](./ARCHITECTURE.md) — Architecture overview
-- [INTEGRATION.md](./INTEGRATION.md) — Backend API integration guide
-- [benchmark_report.md](./benchmark_report.md) — Stage 1 latency benchmarks
+### Latency Comparison
+
+![Latency Comparison](./docs/benchmarks/latency_comparison.png)
+
+| Model | File Type | Avg Latency | Throughput |
+| :--- | :--- | :--- | :--- |
+| **PE-Lite (Stage 1)** | PE (.exe, .dll) | 58.31 ms | 17.15 files/sec |
+| **CLIP NSFW (Stage 1)** | Image (.jpg, .png) | 41.42 ms | 24.15 images/sec |
+
+### Distillation Loss Curve
+
+![Distillation Loss](./docs/benchmarks/distillation_loss.png)
+
+Stage 1 CLIP MLP head training loss using soft labels from Stage 2, converging to ~0.001 after 50 epochs.
