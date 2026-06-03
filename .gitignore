@@ -21,3 +21,8 @@ venv/
 .DS_Store
 *.png
 references/
+PIPELINE.md
+ARCHITECTURE.md
+INTEGRATION.md
+benchmark_report.md
+SAMPLE-README.md
