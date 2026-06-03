@@ -133,17 +133,14 @@ make clean           # Remove caches and temp files
 
 ## Benchmarks
 
-### Latency Comparison
+### Cascade Pareto Analysis
 
-![Latency Comparison](./docs/benchmarks/latency_comparison.png)
+![Cascade Pareto](./docs/benchmarks/E_cascade_pareto_simulation.png)
 
-| Model | File Type | Avg Latency | Throughput |
-| :--- | :--- | :--- | :--- |
-| **PE-Lite (Stage 1)** | PE (.exe, .dll) | 58.31 ms | 17.15 files/sec |
-| **CLIP NSFW (Stage 1)** | Image (.jpg, .png) | 41.42 ms | 24.15 images/sec |
+Each point on the curve represents a different Stage 1 threshold setting. Moving left reduces latency (fewer Stage 2 escalations) at the cost of a higher false-safe rate. The distilled student shifts the frontier, achieving the same false-safe rate at lower expected latency.
 
-### Distillation Loss Curve
-
-![Distillation Loss](./docs/benchmarks/distillation_loss.png)
-
-Stage 1 CLIP MLP head training loss using soft labels from Stage 2, converging to ~0.001 after 50 epochs.
+| Model | Threshold | Avg Latency | Escalation Rate | False-Safe Rate |
+| :--- | :--- | :--- | :--- | :--- |
+| **PE-Lite baseline (Stage 1)** | 0.20 / 0.80 | 34.1 ms | 24.1% | 1.70% |
+| **PE-Lite distilled (Stage 1)** | 0.20 / 0.80 | 35.1 ms | 25.1% | 1.71% |
+| **EMBER LightGBM (Stage 2)** | — | ~100 ms | — | ~0.06% |
