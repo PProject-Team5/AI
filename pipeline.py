@@ -8,6 +8,8 @@ import sys
 import time
 import json
 import logging
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional, Dict, Any
 from dataclasses import dataclass
@@ -275,6 +277,68 @@ class CascadePipeline:
         }
 
 
+class VerificationQueueWorker:
+    def __init__(self, pipeline: CascadePipeline, max_workers: int = 2):
+        self.pipeline = pipeline
+        self.max_workers = max_workers
+        self.queue_dir = os.path.join(os.path.dirname(__file__), "data/verification_queue")
+        self.results_path = os.path.join(os.path.dirname(__file__), "data/verification_results.jsonl")
+        self.executor = ThreadPoolExecutor(max_workers=self.max_workers)
+        self.lock = threading.Lock()
+        self._running_hashes = set()
+
+        os.makedirs(self.queue_dir, exist_ok=True)
+        os.makedirs(os.path.dirname(self.results_path), exist_ok=True)
+
+    def start(self):
+        logger.info("Initializing background verification worker...")
+        for filename in os.listdir(self.queue_dir):
+            file_path = os.path.join(self.queue_dir, filename)
+            if os.path.isfile(file_path):
+                self.enqueue(file_path, filename)
+
+    def enqueue(self, file_path: str, file_hash: str):
+        with self.lock:
+            if file_hash in self._running_hashes:
+                return
+            self._running_hashes.add(file_hash)
+
+        self.executor.submit(self._process_task, file_path, file_hash)
+
+    def _process_task(self, file_path: str, file_hash: str):
+        try:
+            logger.info(f"Processing background verification for {file_hash}")
+            orig_stage2 = self.pipeline.stage2_enabled
+            self.pipeline.stage2_enabled = True
+            result = self.pipeline.scan(file_path)
+            self.pipeline.stage2_enabled = orig_stage2
+
+            record = {
+                "timestamp": time.time(),
+                "file_hash": file_hash,
+                "verdict": 1 if result.blocked else 0,
+                "file_type": result.file_type,
+                "nsfw_prob": result.nsfw_prob,
+                "malware_prob": result.malware_prob
+            }
+
+            with self.lock:
+                with open(self.results_path, "a") as f:
+                    f.write(json.dumps(record) + "\n")
+
+            logger.info(f"Background verification completed for {file_hash}: verdict={record['verdict']}")
+        except Exception as e:
+            logger.error(f"Background verification failed for {file_hash}: {e}")
+        finally:
+            with self.lock:
+                self._running_hashes.discard(file_hash)
+            if os.path.exists(file_path):
+                try:
+                    os.unlink(file_path)
+                except Exception as e:
+                    logger.error(f"Failed to delete queue file {file_path}: {e}")
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(description="Minit-ML Cascade Pipeline")
@@ -336,45 +400,21 @@ def main():
         parser.print_help()
 
 
-def verify_in_background(pipeline: CascadePipeline, file_path: str, file_hash: str):
-    try:
-        orig_stage2 = pipeline.stage2_enabled
-        pipeline.stage2_enabled = True
-        result = pipeline.scan(file_path)
-        pipeline.stage2_enabled = orig_stage2
-
-        results_path = os.path.join(os.path.dirname(__file__), "data/verification_results.jsonl")
-        os.makedirs(os.path.dirname(results_path), exist_ok=True)
-
-        record = {
-            "timestamp": time.time(),
-            "file_hash": file_hash,
-            "verdict": 1 if result.blocked else 0,
-            "file_type": result.file_type,
-            "nsfw_prob": result.nsfw_prob,
-            "malware_prob": result.malware_prob
-        }
-        with open(results_path, "a") as f:
-            f.write(json.dumps(record) + "\n")
-
-        logger.info(f"Background verification completed for {file_hash}: verdict={record['verdict']}")
-    except Exception as e:
-        logger.error(f"Background verification failed for {file_hash}: {e}")
-    finally:
-        if os.path.exists(file_path):
-            os.unlink(file_path)
-
-
 def create_fastapi_app(pipeline: CascadePipeline = None):
-    from fastapi import FastAPI, UploadFile, File, BackgroundTasks
+    from fastapi import FastAPI, UploadFile, File
     import tempfile
     import shutil
 
     app = FastAPI(title="Minit-ML Content Moderation API")
     pipeline = pipeline or CascadePipeline()
 
+    @app.on_event("startup")
+    async def startup_event():
+        app.state.queue_worker = VerificationQueueWorker(pipeline, max_workers=2)
+        app.state.queue_worker.start()
+
     @app.post("/scan")
-    async def scan_file(file: UploadFile = File(...), background_tasks: BackgroundTasks = BackgroundTasks()):
+    async def scan_file(file: UploadFile = File(...)):
         with tempfile.NamedTemporaryFile(delete=False, suffix=f"_{file.filename}") as tmp:
             content = await file.read()
             tmp.write(content)
@@ -390,8 +430,12 @@ def create_fastapi_app(pipeline: CascadePipeline = None):
                 queue_dir = os.path.join(os.path.dirname(__file__), "data/verification_queue")
                 os.makedirs(queue_dir, exist_ok=True)
                 queue_path = os.path.join(queue_dir, result.file_hash)
-                shutil.copy(tmp_path, queue_path)
-                background_tasks.add_task(verify_in_background, pipeline, queue_path, result.file_hash)
+                
+                if not os.path.exists(queue_path):
+                    shutil.copy(tmp_path, queue_path)
+                    queue_worker = getattr(app.state, "queue_worker", None)
+                    if queue_worker:
+                        queue_worker.enqueue(queue_path, result.file_hash)
 
             return {
                 "verdict": result.verdict,
@@ -444,6 +488,12 @@ def create_fastapi_app(pipeline: CascadePipeline = None):
                             "verdict": record["verdict"],
                             "timestamp": record["timestamp"]
                         }
+
+        queue_worker = getattr(app.state, "queue_worker", None)
+        if queue_worker:
+            with queue_worker.lock:
+                if file_hash in queue_worker._running_hashes:
+                    return {"status": "pending"}
 
         queue_dir = os.path.join(os.path.dirname(__file__), "data/verification_queue")
         queue_path = os.path.join(queue_dir, file_hash)
